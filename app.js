@@ -1,7 +1,9 @@
 // MarketPulse — Stock Signal Analyzer + Monthly ROI Tracker
 // Uses Yahoo Finance public API (no key required)
 
-const PROXY = 'https://query1.finance.yahoo.com/v8/finance/chart/';
+const YAHOO_BASE = 'https://query1.finance.yahoo.com/v8/finance/chart/';
+const CORS_PROXY = 'https://corsproxy.io/?';
+const PROXY = CORS_PROXY + encodeURIComponent(YAHOO_BASE);
 
 // ── DOM refs ──
 const tickerInput = document.getElementById('ticker-input');
@@ -23,13 +25,28 @@ document.querySelectorAll('.quick-btn').forEach(btn => {
 
 // ── Fetch ──
 async function fetchData(ticker) {
-  const url = `${PROXY}${encodeURIComponent(ticker)}?interval=1d&range=1y`;
-  const res = await fetch(url);
-  if (!res.ok) throw new Error(`HTTP ${res.status}`);
-  const data = await res.json();
-  const result = data?.chart?.result?.[0];
-  if (!result) throw new Error('No data returned. Check the ticker symbol.');
-  return result;
+  const params = `?interval=1d&range=1y`;
+
+  // Try direct first, fall back to CORS proxy
+  const urls = [
+    `${YAHOO_BASE}${encodeURIComponent(ticker)}${params}`,
+    `${CORS_PROXY}${encodeURIComponent(YAHOO_BASE + ticker + params)}`,
+  ];
+
+  let lastErr;
+  for (const url of urls) {
+    try {
+      const res = await fetch(url);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
+      const result = data?.chart?.result?.[0];
+      if (!result) throw new Error('No data returned. Check the ticker symbol.');
+      return result;
+    } catch (e) {
+      lastErr = e;
+    }
+  }
+  throw lastErr;
 }
 
 // ── Math helpers ──
