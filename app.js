@@ -2,8 +2,6 @@
 // Uses Yahoo Finance public API (no key required)
 
 const YAHOO_BASE = 'https://query1.finance.yahoo.com/v8/finance/chart/';
-const CORS_PROXY = 'https://corsproxy.io/?';
-const PROXY = CORS_PROXY + encodeURIComponent(YAHOO_BASE);
 
 // ── DOM refs ──
 const tickerInput = document.getElementById('ticker-input');
@@ -25,28 +23,30 @@ document.querySelectorAll('.quick-btn').forEach(btn => {
 
 // ── Fetch ──
 async function fetchData(ticker) {
-  const params = `?interval=1d&range=1y`;
+  const target = `${YAHOO_BASE}${encodeURIComponent(ticker)}?interval=1d&range=1y`;
 
-  // Try direct first, fall back to CORS proxy
+  // Try multiple strategies — direct + CORS proxies
   const urls = [
-    `${YAHOO_BASE}${encodeURIComponent(ticker)}${params}`,
-    `${CORS_PROXY}${encodeURIComponent(YAHOO_BASE + ticker + params)}`,
+    target,
+    `https://api.allorigins.win/raw?url=${encodeURIComponent(target)}`,
+    `https://corsproxy.io/?${encodeURIComponent(target)}`,
+    `https://thingproxy.freeboard.io/fetch/${target}`,
   ];
 
   let lastErr;
   for (const url of urls) {
     try {
-      const res = await fetch(url);
+      const res = await fetch(url, { headers: { 'Accept': 'application/json' } });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
       const result = data?.chart?.result?.[0];
-      if (!result) throw new Error('No data returned. Check the ticker symbol.');
-      return result;
+      if (result) return result;
+      throw new Error('No data returned. Check the ticker symbol.');
     } catch (e) {
       lastErr = e;
     }
   }
-  throw lastErr;
+  throw new Error('Unable to fetch data. Yahoo Finance may be temporarily unavailable. Try again in a moment.');
 }
 
 // ── Math helpers ──
