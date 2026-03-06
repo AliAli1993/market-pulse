@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>MarketPulse — Stock Signal Analyzer</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div class="app">
+    <header>
+      <div class="header-inner">
+        <div class="logo">📈 MarketPulse</div>
+        <p class="tagline">Signal-based stock analysis using real technical indicators</p>
+        <div class="search-wrap">
+          <input id="ticker-input" type="text" placeholder="Enter ticker (e.g. AAPL, TSLA, NVDA)" autocomplete="off" autocapitalize="characters" />
+          <button id="search-btn">Analyze</button>
+        </div>
+        <div class="popular">
+          <span>Quick:</span>
+          <button class="quick-btn" data-ticker="AAPL">AAPL</button>
+          <button class="quick-btn" data-ticker="TSLA">TSLA</button>
+          <button class="quick-btn" data-ticker="NVDA">NVDA</button>
+          <button class="quick-btn" data-ticker="MSFT">MSFT</button>
+          <button class="quick-btn" data-ticker="SPY">SPY</button>
+        </div>
+      </div>
+    </header>
+
+    <main>
+      <div id="idle" class="idle-state">
+        <div class="idle-icon">🔍</div>
+        <p>Enter a stock ticker above to see its signal analysis</p>
+      </div>
+      <div id="loading" class="loading hidden">
+        <div class="spinner"></div>
+        <p>Fetching market data...</p>
+      </div>
+      <div id="error" class="error hidden"></div>
+      <div id="results" class="results hidden">
+        <!-- Populated by JS -->
+      </div>
+    </main>
+
+    <footer>
+      <p>⚠️ <strong>Not financial advice.</strong> Signals are based on technical indicators only. Always do your own research before investing.</p>
+      <p>Data via Yahoo Finance · Calculations run client-side</p>
+    </footer>
+  </div>
+  <script src="app.js"></script>
+</body>
+</html>
