@@ -1,6 +1,5 @@
-// MarketPulse — Stock Signal Analyzer
+// MarketPulse — Stock Signal Analyzer + Monthly ROI Tracker
 // Uses Yahoo Finance public API (no key required)
-// Indicators: RSI(14), MACD(12/26/9), SMA50, SMA200, Price vs 52w High/Low
 
 const PROXY = 'https://query1.finance.yahoo.com/v8/finance/chart/';
 
@@ -70,38 +69,70 @@ function rsi(prices, period = 14) {
   return 100 - 100 / (1 + rs);
 }
 
-function macd(prices) {
+function macdCalc(prices) {
   const ema12 = ema(prices, 12);
   const ema26 = ema(prices, 26);
   if (ema12 === null || ema26 === null) return null;
   return { line: ema12 - ema26, ema12, ema26 };
 }
 
+// ── Monthly ROI ──
+function computeMonthlyROI(timestamps, closes) {
+  // Group closes by YYYY-MM
+  const byMonth = {};
+  timestamps.forEach((ts, i) => {
+    const d = new Date(ts * 1000);
+    const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+    if (!byMonth[key]) byMonth[key] = [];
+    byMonth[key].push(closes[i]);
+  });
+
+  const months = Object.keys(byMonth).sort();
+  // Need at least 2 months
+  if (months.length < 2) return null;
+
+  const monthlyReturns = [];
+  for (let i = 1; i < months.length; i++) {
+    const prevMonth = byMonth[months[i - 1]];
+    const currMonth = byMonth[months[i]];
+    const open  = prevMonth[prevMonth.length - 1]; // last close of prev month
+    const close = currMonth[currMonth.length - 1]; // last close of curr month
+    const ret = ((close - open) / open) * 100;
+    monthlyReturns.push({ month: months[i], ret });
+  }
+
+  const TARGET = 4.0;
+  const avg = mean(monthlyReturns.map(m => m.ret));
+  const hitCount = monthlyReturns.filter(m => m.ret >= TARGET).length;
+  const hitRate  = (hitCount / monthlyReturns.length) * 100;
+  const best     = Math.max(...monthlyReturns.map(m => m.ret));
+  const worst    = Math.min(...monthlyReturns.map(m => m.ret));
+
+  return { monthlyReturns, avg, hitCount, hitRate, best, worst, total: monthlyReturns.length };
+}
+
 // ── Signal scoring ──
-// Returns { label, score (0-100), signals[] }
 function computeSignal({ price, sma50, sma200, rsiVal, macdData, high52, low52 }) {
   const signals = [];
   let bullishPoints = 0;
   let totalPoints = 0;
 
-  // 1. RSI
   if (rsiVal !== null) {
     totalPoints += 20;
     if (rsiVal < 30) {
       bullishPoints += 20;
-      signals.push({ label: 'RSI', value: rsiVal.toFixed(1), signal: 'bullish', desc: 'Oversold — historically a buy zone' });
+      signals.push({ label: 'RSI (14)', value: rsiVal.toFixed(1), signal: 'bullish', desc: 'Oversold — historically a buy zone' });
     } else if (rsiVal > 70) {
-      signals.push({ label: 'RSI', value: rsiVal.toFixed(1), signal: 'bearish', desc: 'Overbought — caution territory' });
+      signals.push({ label: 'RSI (14)', value: rsiVal.toFixed(1), signal: 'bearish', desc: 'Overbought — caution territory' });
     } else if (rsiVal >= 45 && rsiVal <= 65) {
       bullishPoints += 14;
-      signals.push({ label: 'RSI', value: rsiVal.toFixed(1), signal: 'neutral', desc: 'Healthy momentum range' });
+      signals.push({ label: 'RSI (14)', value: rsiVal.toFixed(1), signal: 'neutral', desc: 'Healthy momentum range' });
     } else {
       bullishPoints += 8;
-      signals.push({ label: 'RSI', value: rsiVal.toFixed(1), signal: 'neutral', desc: 'Neutral momentum' });
+      signals.push({ label: 'RSI (14)', value: rsiVal.toFixed(1), signal: 'neutral', desc: 'Neutral momentum' });
     }
   }
 
-  // 2. MACD
   if (macdData !== null) {
     totalPoints += 25;
     if (macdData.line > 0) {
@@ -112,7 +143,6 @@ function computeSignal({ price, sma50, sma200, rsiVal, macdData, high52, low52 }
     }
   }
 
-  // 3. Price vs SMA50
   if (sma50 !== null) {
     totalPoints += 20;
     if (price > sma50) {
@@ -123,7 +153,6 @@ function computeSignal({ price, sma50, sma200, rsiVal, macdData, high52, low52 }
     }
   }
 
-  // 4. Price vs SMA200
   if (sma200 !== null) {
     totalPoints += 25;
     if (price > sma200) {
@@ -134,7 +163,6 @@ function computeSignal({ price, sma50, sma200, rsiVal, macdData, high52, low52 }
     }
   }
 
-  // 5. 52-week position
   if (high52 && low52) {
     totalPoints += 10;
     const range = high52 - low52;
@@ -158,17 +186,23 @@ function computeSignal({ price, sma50, sma200, rsiVal, macdData, high52, low52 }
 // ── Formatting ──
 function fmt(n) {
   if (n === null || n === undefined) return '—';
-  if (n >= 1e12) return '$' + (n / 1e12).toFixed(2) + 'T';
-  if (n >= 1e9)  return '$' + (n / 1e9).toFixed(2) + 'B';
-  if (n >= 1e6)  return '$' + (n / 1e6).toFixed(2) + 'M';
+  if (Math.abs(n) >= 1e12) return '$' + (n / 1e12).toFixed(2) + 'T';
+  if (Math.abs(n) >= 1e9)  return '$' + (n / 1e9).toFixed(2) + 'B';
+  if (Math.abs(n) >= 1e6)  return '$' + (n / 1e6).toFixed(2) + 'M';
   return '$' + n.toFixed(2);
 }
 
-function signalIcon(s) {
-  return s === 'bullish' ? '🟢' : s === 'bearish' ? '🔴' : '🟡';
+function fmtPct(n, decimals = 1) {
+  const sign = n >= 0 ? '+' : '';
+  return `${sign}${n.toFixed(decimals)}%`;
 }
-function signalLabel(s) {
-  return s === 'bullish' ? '▲ BULLISH' : s === 'bearish' ? '▼ BEARISH' : '● NEUTRAL';
+
+function signalIcon(s) { return s === 'bullish' ? '🟢' : s === 'bearish' ? '🔴' : '🟡'; }
+function signalLabel(s) { return s === 'bullish' ? '▲ BULLISH' : s === 'bearish' ? '▼ BEARISH' : '● NEUTRAL'; }
+
+function monthName(key) {
+  const [y, m] = key.split('-');
+  return new Date(+y, +m - 1).toLocaleString('default', { month: 'short', year: '2-digit' });
 }
 
 // ── Show/hide ──
@@ -178,17 +212,17 @@ function setState(state) {
 }
 
 // ── Render ──
-function render(ticker, meta, prices, closes) {
-  const price    = closes[closes.length - 1];
+function render(ticker, meta, timestamps, closes) {
+  const price     = closes[closes.length - 1];
   const prevClose = closes[closes.length - 2] ?? price;
-  const change   = price - prevClose;
+  const change    = price - prevClose;
   const changePct = (change / prevClose) * 100;
-  const dir      = change > 0 ? 'up' : change < 0 ? 'down' : 'flat';
+  const dir       = change > 0 ? 'up' : change < 0 ? 'down' : 'flat';
 
-  const sma50Val   = sma(closes, 50);
-  const sma200Val  = sma(closes, 200);
-  const rsiVal     = rsi(closes, 14);
-  const macdData   = macd(closes);
+  const sma50Val  = sma(closes, 50);
+  const sma200Val = sma(closes, 200);
+  const rsiVal    = rsi(closes, 14);
+  const macdData  = macdCalc(closes);
 
   const high52 = meta.fiftyTwoWeekHigh ?? Math.max(...closes);
   const low52  = meta.fiftyTwoWeekLow  ?? Math.min(...closes);
@@ -200,11 +234,78 @@ function render(ticker, meta, prices, closes) {
     rsiVal, macdData, high52, low52
   });
 
+  const roi = computeMonthlyROI(timestamps, closes);
+  const TARGET = 4.0;
+
   const summaries = {
     bullish: 'Most technical indicators are aligned positively. Momentum favors buyers.',
     bearish: 'Most technical indicators are pointing down. Momentum favors sellers.',
     neutral: 'Mixed signals — indicators are not clearly aligned in either direction.',
   };
+
+  // Monthly bar chart
+  const roiSection = roi ? (() => {
+    const barMax = Math.max(Math.abs(roi.best), Math.abs(roi.worst), 8);
+    const bars = roi.monthlyReturns.map(m => {
+      const hit  = m.ret >= TARGET;
+      const neg  = m.ret < 0;
+      const pct  = Math.min(Math.abs(m.ret) / barMax * 100, 100);
+      const cls  = hit ? 'bar-hit' : neg ? 'bar-neg' : 'bar-neutral';
+      return `
+        <div class="month-bar-wrap" title="${monthName(m.month)}: ${fmtPct(m.ret)}">
+          <div class="month-bar-container">
+            <div class="month-bar ${cls}" style="height:${pct}%"></div>
+          </div>
+          <div class="month-bar-label">${monthName(m.month)}</div>
+        </div>`;
+    }).join('');
+
+    const roiClass = roi.avg >= TARGET ? 'up' : roi.avg >= 0 ? 'flat' : 'down';
+    const targetClass = roi.hitRate >= 50 ? 'up' : 'down';
+
+    return `
+      <div class="roi-box">
+        <div class="roi-header">
+          <div>
+            <div class="section-title" style="margin:0">Monthly ROI — 4% Target Tracker</div>
+            <div class="roi-subtitle">Based on last ${roi.total} months of real price data</div>
+          </div>
+          <div class="roi-avg ${roiClass}">${fmtPct(roi.avg)} avg/mo</div>
+        </div>
+
+        <div class="roi-stats">
+          <div class="roi-stat">
+            <div class="roi-stat-label">Avg Monthly Return</div>
+            <div class="roi-stat-value ${roiClass}">${fmtPct(roi.avg)}</div>
+          </div>
+          <div class="roi-stat">
+            <div class="roi-stat-label">Hit 4%+ Target</div>
+            <div class="roi-stat-value ${targetClass}">${roi.hitCount}/${roi.total} months</div>
+          </div>
+          <div class="roi-stat">
+            <div class="roi-stat-label">Hit Rate</div>
+            <div class="roi-stat-value ${targetClass}">${roi.hitRate.toFixed(0)}%</div>
+          </div>
+          <div class="roi-stat">
+            <div class="roi-stat-label">Best Month</div>
+            <div class="roi-stat-value up">${fmtPct(roi.best)}</div>
+          </div>
+          <div class="roi-stat">
+            <div class="roi-stat-label">Worst Month</div>
+            <div class="roi-stat-value down">${fmtPct(roi.worst)}</div>
+          </div>
+        </div>
+
+        <div class="bar-chart">
+          ${bars}
+        </div>
+        <div class="bar-legend">
+          <span class="legend-dot hit"></span> ≥ 4% target &nbsp;
+          <span class="legend-dot neutral-dot"></span> Positive &nbsp;
+          <span class="legend-dot neg-dot"></span> Negative
+        </div>
+      </div>`;
+  })() : '';
 
   resultsEl.innerHTML = `
     <div class="stock-header">
@@ -215,10 +316,12 @@ function render(ticker, meta, prices, closes) {
       <div class="stock-price">
         <div class="price-main">${fmt(price)}</div>
         <div class="price-change ${dir}">
-          ${change >= 0 ? '+' : ''}${fmt(change).replace('$','')} (${changePct >= 0 ? '+' : ''}${changePct.toFixed(2)}%) today
+          ${change >= 0 ? '+' : ''}${Math.abs(change).toFixed(2)} (${fmtPct(changePct)}) today
         </div>
       </div>
     </div>
+
+    ${roiSection}
 
     <div class="signal-box">
       <div class="signal-badge ${label}">${signalLabel(label)}</div>
@@ -265,15 +368,19 @@ async function analyze(ticker) {
   if (!ticker) return;
   tickerInput.value = ticker;
   setState('loading');
-
   try {
     const result  = await fetchData(ticker);
     const meta    = result.meta;
-    const closes  = result.indicators.quote[0].close.filter(v => v !== null);
-    const prices  = result.timestamp;
+    const raw     = result.indicators.quote[0].close;
+    const ts      = result.timestamp;
+
+    // Filter out null closes with matching timestamps
+    const paired = ts.map((t, i) => ({ t, c: raw[i] })).filter(p => p.c !== null);
+    const timestamps = paired.map(p => p.t);
+    const closes     = paired.map(p => p.c);
 
     if (closes.length < 30) throw new Error('Not enough historical data for this ticker.');
-    render(ticker, meta, prices, closes);
+    render(ticker, meta, timestamps, closes);
   } catch (err) {
     errorEl.textContent = '⚠️ ' + err.message;
     setState('error');
